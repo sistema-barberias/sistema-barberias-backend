@@ -18,11 +18,63 @@ router.post('/registro', async (req, res) => {
       password
     } = req.body;
 
-    if (!nombre || !correo || !password) {
+
+    // =====================================================
+    // VALIDAR CAMPOS OBLIGATORIOS
+    // =====================================================
+
+    if (!nombre || !correo || !telefono || !password) {
       return res.status(400).json({
-        mensaje: 'Nombre, correo y contraseña son obligatorios'
+        mensaje: 'Nombre, correo, teléfono y contraseña son obligatorios'
       });
     }
+
+
+    // =====================================================
+    // VALIDAR CORREO
+    // Solo permite Gmail o Hotmail
+    // =====================================================
+
+    const correoValido = /^[^\s@]+@(gmail|hotmail)\.com$/i;
+
+    if (!correoValido.test(correo)) {
+      return res.status(400).json({
+        mensaje: 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)'
+      });
+    }
+
+
+    // =====================================================
+    // VALIDAR TELÉFONO
+    // Solo permite números
+    // =====================================================
+
+    const telefonoValido = /^\d+$/;
+
+    if (!telefonoValido.test(String(telefono))) {
+      return res.status(400).json({
+        mensaje: 'El teléfono solo puede contener números'
+      });
+    }
+
+
+    // =====================================================
+    // VALIDAR CONTRASEÑA
+    // Exactamente 6 dígitos numéricos
+    // =====================================================
+
+    const passwordValida = /^\d{6}$/;
+
+    if (!passwordValida.test(password)) {
+      return res.status(400).json({
+        mensaje: 'La contraseña debe tener exactamente 6 dígitos numéricos'
+      });
+    }
+
+
+    // =====================================================
+    // COMPROBAR SI EL CORREO YA ESTÁ REGISTRADO
+    // =====================================================
 
     const usuarioExistente = await pool.query(
       'SELECT id_usuario FROM usuarios WHERE correo = $1',
@@ -35,13 +87,29 @@ router.post('/registro', async (req, res) => {
       });
     }
 
+
+    // =====================================================
+    // ENCRIPTAR CONTRASEÑA
+    // =====================================================
+
     const passwordHash = await bcrypt.hash(password, 10);
+
+
+    // =====================================================
+    // INSERTAR USUARIO EN LA BASE DE DATOS
+    // =====================================================
 
     const resultado = await pool.query(
       `INSERT INTO usuarios
         (nombre, correo, telefono, password, rol, estado)
        VALUES ($1, $2, $3, $4, 'Cliente', 'Activo')
-       RETURNING id_usuario, nombre, correo, telefono, rol, estado`,
+       RETURNING
+        id_usuario,
+        nombre,
+        correo,
+        telefono,
+        rol,
+        estado`,
       [
         nombre,
         correo,
@@ -50,12 +118,18 @@ router.post('/registro', async (req, res) => {
       ]
     );
 
+
+    // =====================================================
+    // RESPUESTA EXITOSA
+    // =====================================================
+
     res.status(201).json({
       mensaje: 'Usuario registrado correctamente',
       usuario: resultado.rows[0]
     });
 
   } catch (error) {
+
     console.error('Error registrando usuario:', error);
 
     res.status(500).json({
@@ -76,11 +150,21 @@ router.post('/login', async (req, res) => {
       password
     } = req.body;
 
+
+    // =====================================================
+    // VALIDAR CAMPOS
+    // =====================================================
+
     if (!correo || !password) {
       return res.status(400).json({
         mensaje: 'Correo y contraseña son obligatorios'
       });
     }
+
+
+    // =====================================================
+    // BUSCAR USUARIO
+    // =====================================================
 
     const resultado = await pool.query(
       `SELECT
@@ -96,13 +180,24 @@ router.post('/login', async (req, res) => {
       [correo]
     );
 
+
+    // =====================================================
+    // USUARIO NO ENCONTRADO
+    // =====================================================
+
     if (resultado.rows.length === 0) {
       return res.status(401).json({
         mensaje: 'Las credenciales ingresadas no son correctas'
       });
     }
 
+
     const usuario = resultado.rows[0];
+
+
+    // =====================================================
+    // COMPROBAR ESTADO DEL USUARIO
+    // =====================================================
 
     if (usuario.estado === 'Inactivo') {
       return res.status(403).json({
@@ -110,10 +205,16 @@ router.post('/login', async (req, res) => {
       });
     }
 
+
+    // =====================================================
+    // COMPROBAR CONTRASEÑA
+    // =====================================================
+
     const passwordCorrecta = await bcrypt.compare(
       password,
       usuario.password
     );
+
 
     if (!passwordCorrecta) {
       return res.status(401).json({
@@ -121,7 +222,14 @@ router.post('/login', async (req, res) => {
       });
     }
 
+
+    // No enviar la contraseña al frontend
     delete usuario.password;
+
+
+    // =====================================================
+    // RESPUESTA LOGIN
+    // =====================================================
 
     res.json({
       mensaje: 'Inicio de sesión exitoso',
@@ -129,6 +237,7 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (error) {
+
     console.error('Error iniciando sesión:', error);
 
     res.status(500).json({
@@ -148,6 +257,7 @@ router.get('/', async (req, res) => {
       criterio = ''
     } = req.query;
 
+
     const resultado = await pool.query(
       `SELECT
         id_usuario,
@@ -163,9 +273,11 @@ router.get('/', async (req, res) => {
       [`%${criterio}%`]
     );
 
+
     res.json(resultado.rows);
 
   } catch (error) {
+
     console.error('Error buscando usuarios:', error);
 
     res.status(500).json({
@@ -185,16 +297,27 @@ router.put('/:id', async (req, res) => {
       id
     } = req.params;
 
+
     const {
       nombre,
       telefono
     } = req.body;
+
+
+    // =====================================================
+    // VALIDAR NOMBRE
+    // =====================================================
 
     if (!nombre) {
       return res.status(400).json({
         mensaje: 'El nombre es obligatorio'
       });
     }
+
+
+    // =====================================================
+    // ACTUALIZAR USUARIO
+    // =====================================================
 
     const resultado = await pool.query(
       `UPDATE usuarios
@@ -215,11 +338,17 @@ router.put('/:id', async (req, res) => {
       ]
     );
 
+
+    // =====================================================
+    // USUARIO NO ENCONTRADO
+    // =====================================================
+
     if (resultado.rows.length === 0) {
       return res.status(404).json({
         mensaje: 'Usuario no encontrado'
       });
     }
+
 
     res.json({
       mensaje: 'Usuario actualizado correctamente',
@@ -227,6 +356,7 @@ router.put('/:id', async (req, res) => {
     });
 
   } catch (error) {
+
     console.error('Error actualizando usuario:', error);
 
     res.status(500).json({
@@ -246,15 +376,26 @@ router.patch('/:id/estado', async (req, res) => {
       id
     } = req.params;
 
+
     const {
       estado
     } = req.body;
+
+
+    // =====================================================
+    // VALIDAR ESTADO
+    // =====================================================
 
     if (!['Activo', 'Inactivo'].includes(estado)) {
       return res.status(400).json({
         mensaje: 'El estado debe ser Activo o Inactivo'
       });
     }
+
+
+    // =====================================================
+    // ACTUALIZAR ESTADO
+    // =====================================================
 
     const resultado = await pool.query(
       `UPDATE usuarios
@@ -273,11 +414,17 @@ router.patch('/:id/estado', async (req, res) => {
       ]
     );
 
+
+    // =====================================================
+    // USUARIO NO ENCONTRADO
+    // =====================================================
+
     if (resultado.rows.length === 0) {
       return res.status(404).json({
         mensaje: 'Usuario no encontrado'
       });
     }
+
 
     res.json({
       mensaje: 'Estado actualizado correctamente',
@@ -285,6 +432,7 @@ router.patch('/:id/estado', async (req, res) => {
     });
 
   } catch (error) {
+
     console.error('Error actualizando estado:', error);
 
     res.status(500).json({
@@ -295,3 +443,4 @@ router.patch('/:id/estado', async (req, res) => {
 
 
 export default router;
+
