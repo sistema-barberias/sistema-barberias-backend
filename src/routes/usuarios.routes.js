@@ -8,6 +8,29 @@ const ROLES = ['Cliente', 'Barbero', 'Administrador'];
 
 const idValido = (id) => /^\d+$/.test(String(id));
 
+// Devuelve el texto del problema si el correo o el teléfono ya los usa OTRO usuario
+// (idExcluido sirve al editar, para no chocar con el propio usuario). Si están libres, devuelve null.
+// Es necesario que el teléfono sea único porque también se usa para iniciar sesión.
+const datoRepetido = async ({ correo, telefono }, idExcluido = null) => {
+  if (correo) {
+    const r = await pool.query(
+      'SELECT 1 FROM usuarios WHERE correo = $1 AND id_usuario IS DISTINCT FROM $2',
+      [correo, idExcluido]
+    );
+    if (r.rows.length > 0) return 'El correo ya está registrado';
+  }
+
+  if (telefono) {
+    const r = await pool.query(
+      'SELECT 1 FROM usuarios WHERE telefono::text = $1 AND id_usuario IS DISTINCT FROM $2',
+      [String(telefono), idExcluido]
+    );
+    if (r.rows.length > 0) return 'El teléfono ya está registrado';
+  }
+
+  return null;
+};
+
 
 // =====================================================
 // REGISTRAR USUARIO
@@ -77,17 +100,14 @@ router.post('/registro', async (req, res) => {
 
 
     // =====================================================
-    // COMPROBAR SI EL CORREO YA ESTÁ REGISTRADO
+    // COMPROBAR SI EL CORREO O EL TELÉFONO YA ESTÁN REGISTRADOS
     // =====================================================
 
-    const usuarioExistente = await pool.query(
-      'SELECT id_usuario FROM usuarios WHERE correo = $1',
-      [correo]
-    );
+    const repetido = await datoRepetido({ correo, telefono });
 
-    if (usuarioExistente.rows.length > 0) {
+    if (repetido) {
       return res.status(400).json({
-        mensaje: 'El correo ya está registrado'
+        mensaje: repetido
       });
     }
 
@@ -257,11 +277,22 @@ router.post('/login', async (req, res) => {
 // BUSCAR USUARIOS
 // =====================================================
 
+// Parámetros opcionales:
+//   criterio  Texto a buscar en nombre, correo o teléfono
+//   rol       Solo devuelve usuarios de ese rol (por ejemplo Cliente)
+
 router.get('/', async (req, res) => {
   try {
     const {
-      criterio = ''
+      criterio = '',
+      rol = null
     } = req.query;
+
+    if (rol && !ROLES.includes(rol)) {
+      return res.status(400).json({
+        mensaje: `El rol debe ser uno de: ${ROLES.join(', ')}`
+      });
+    }
 
 
     const resultado = await pool.query(
@@ -273,10 +304,12 @@ router.get('/', async (req, res) => {
         rol,
         estado
        FROM usuarios
-       WHERE LOWER(nombre) LIKE LOWER($1)
-          OR LOWER(correo) LIKE LOWER($1)
+       WHERE ($2::text IS NULL OR rol = $2)
+         AND (LOWER(nombre) LIKE LOWER($1)
+              OR LOWER(correo) LIKE LOWER($1)
+              OR telefono::text LIKE $1)
        ORDER BY id_usuario DESC`,
-      [`%${criterio}%`]
+      [`%${criterio}%`, rol]
     );
 
 
@@ -306,12 +339,15 @@ router.put('/:id', async (req, res) => {
 
     const {
       nombre,
-      telefono
+      telefono,
+      correo
     } = req.body;
 
 
     // =====================================================
-    // VALIDAR NOMBRE
+    // VALIDAR DATOS
+    // Nombre obligatorio; teléfono y correo son opcionales
+    // (si no se envían se conservan los actuales)
     // =====================================================
 
     if (!idValido(id)) {
@@ -333,16 +369,37 @@ router.put('/:id', async (req, res) => {
     }
 
 
+    if (correo && !/^[^\s@]+@(gmail|hotmail)\.com$/i.test(correo)) {
+      return res.status(400).json({
+        mensaje: 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)'
+      });
+    }
+
+
+    // =====================================================
+    // EL CORREO Y EL TELÉFONO NO PUEDEN ESTAR EN OTRO USUARIO
+    // =====================================================
+
+    const repetido = await datoRepetido({ correo, telefono }, Number(id));
+
+    if (repetido) {
+      return res.status(400).json({
+        mensaje: repetido
+      });
+    }
+
+
     // =====================================================
     // ACTUALIZAR USUARIO
-    // Si no se envía teléfono se conserva el actual
+    // Si no se envía teléfono o correo se conserva el actual
     // =====================================================
 
     const resultado = await pool.query(
       `UPDATE usuarios
        SET nombre = $1,
-           telefono = COALESCE($2, telefono)
-       WHERE id_usuario = $3
+           telefono = COALESCE($2, telefono),
+           correo = COALESCE($3, correo)
+       WHERE id_usuario = $4
        RETURNING
         id_usuario,
         nombre,
@@ -353,6 +410,7 @@ router.put('/:id', async (req, res) => {
       [
         nombre,
         telefono || null,
+        correo || null,
         id
       ]
     );
@@ -558,14 +616,11 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const usuarioExistente = await pool.query(
-      'SELECT id_usuario FROM usuarios WHERE correo = $1',
-      [correo]
-    );
+    const repetido = await datoRepetido({ correo, telefono });
 
-    if (usuarioExistente.rows.length > 0) {
+    if (repetido) {
       return res.status(400).json({
-        mensaje: 'El correo ya está registrado'
+        mensaje: repetido
       });
     }
 
