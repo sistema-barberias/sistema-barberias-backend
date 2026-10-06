@@ -147,17 +147,19 @@ router.post('/login', async (req, res) => {
   try {
     const {
       correo,
+      telefono,
       password
     } = req.body;
 
 
     // =====================================================
     // VALIDAR CAMPOS
+    // Se ingresa con correo o con teléfono
     // =====================================================
 
-    if (!correo || !password) {
+    if ((!correo && !telefono) || !password) {
       return res.status(400).json({
-        mensaje: 'Correo y contraseña son obligatorios'
+        mensaje: 'Correo o teléfono y contraseña son obligatorios'
       });
     }
 
@@ -176,8 +178,8 @@ router.post('/login', async (req, res) => {
         rol,
         estado
        FROM usuarios
-       WHERE correo = $1`,
-      [correo]
+       WHERE correo = $1 OR telefono = $2`,
+      [correo || null, telefono || null]
     );
 
 
