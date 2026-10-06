@@ -4,6 +4,10 @@ import pool from '../config/database.js';
 
 const router = express.Router();
 
+const ROLES = ['Cliente', 'Barbero', 'Administrador'];
+
+const idValido = (id) => /^\d+$/.test(String(id));
+
 
 // =====================================================
 // REGISTRAR USUARIO
@@ -310,21 +314,34 @@ router.put('/:id', async (req, res) => {
     // VALIDAR NOMBRE
     // =====================================================
 
+    if (!idValido(id)) {
+      return res.status(400).json({
+        mensaje: 'El id del usuario no es válido'
+      });
+    }
+
     if (!nombre) {
       return res.status(400).json({
         mensaje: 'El nombre es obligatorio'
       });
     }
 
+    if (telefono && !/^\d+$/.test(String(telefono))) {
+      return res.status(400).json({
+        mensaje: 'El teléfono solo puede contener números'
+      });
+    }
+
 
     // =====================================================
     // ACTUALIZAR USUARIO
+    // Si no se envía teléfono se conserva el actual
     // =====================================================
 
     const resultado = await pool.query(
       `UPDATE usuarios
        SET nombre = $1,
-           telefono = $2
+           telefono = COALESCE($2, telefono)
        WHERE id_usuario = $3
        RETURNING
         id_usuario,
@@ -335,7 +352,7 @@ router.put('/:id', async (req, res) => {
         estado`,
       [
         nombre,
-        telefono,
+        telefono || null,
         id
       ]
     );
@@ -388,6 +405,12 @@ router.patch('/:id/estado', async (req, res) => {
     // VALIDAR ESTADO
     // =====================================================
 
+    if (!idValido(id)) {
+      return res.status(400).json({
+        mensaje: 'El id del usuario no es válido'
+      });
+    }
+
     if (!['Activo', 'Inactivo'].includes(estado)) {
       return res.status(400).json({
         mensaje: 'El estado debe ser Activo o Inactivo'
@@ -436,6 +459,189 @@ router.patch('/:id/estado', async (req, res) => {
   } catch (error) {
 
     console.error('Error actualizando estado:', error);
+
+    res.status(500).json({
+      mensaje: 'Error interno del servidor'
+    });
+  }
+});
+
+
+// =====================================================
+// OBTENER USUARIO POR ID
+// =====================================================
+
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!idValido(id)) {
+      return res.status(400).json({
+        mensaje: 'El id del usuario no es válido'
+      });
+    }
+
+    const resultado = await pool.query(
+      `SELECT
+        id_usuario,
+        nombre,
+        correo,
+        telefono,
+        rol,
+        estado
+       FROM usuarios
+       WHERE id_usuario = $1`,
+      [id]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({
+        mensaje: 'Usuario no encontrado'
+      });
+    }
+
+    res.json(resultado.rows[0]);
+
+  } catch (error) {
+
+    console.error('Error obteniendo usuario:', error);
+
+    res.status(500).json({
+      mensaje: 'Error interno del servidor'
+    });
+  }
+});
+
+
+// =====================================================
+// CREAR USUARIO (administración)
+// Permite definir el rol, a diferencia del registro
+// =====================================================
+
+router.post('/', async (req, res) => {
+  try {
+    const {
+      nombre,
+      correo,
+      telefono,
+      password,
+      rol = 'Cliente'
+    } = req.body;
+
+    if (!nombre || !correo || !telefono || !password) {
+      return res.status(400).json({
+        mensaje: 'Nombre, correo, teléfono y contraseña son obligatorios'
+      });
+    }
+
+    if (!/^[^\s@]+@(gmail|hotmail)\.com$/i.test(correo)) {
+      return res.status(400).json({
+        mensaje: 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)'
+      });
+    }
+
+    if (!/^\d+$/.test(String(telefono))) {
+      return res.status(400).json({
+        mensaje: 'El teléfono solo puede contener números'
+      });
+    }
+
+    if (!/^\d{6}$/.test(password)) {
+      return res.status(400).json({
+        mensaje: 'La contraseña debe tener exactamente 6 dígitos numéricos'
+      });
+    }
+
+    if (!ROLES.includes(rol)) {
+      return res.status(400).json({
+        mensaje: `El rol debe ser uno de: ${ROLES.join(', ')}`
+      });
+    }
+
+    const usuarioExistente = await pool.query(
+      'SELECT id_usuario FROM usuarios WHERE correo = $1',
+      [correo]
+    );
+
+    if (usuarioExistente.rows.length > 0) {
+      return res.status(400).json({
+        mensaje: 'El correo ya está registrado'
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const resultado = await pool.query(
+      `INSERT INTO usuarios
+        (nombre, correo, telefono, password, rol, estado)
+       VALUES ($1, $2, $3, $4, $5, 'Activo')
+       RETURNING
+        id_usuario,
+        nombre,
+        correo,
+        telefono,
+        rol,
+        estado`,
+      [nombre, correo, telefono, passwordHash, rol]
+    );
+
+    res.status(201).json({
+      mensaje: 'Usuario creado correctamente',
+      usuario: resultado.rows[0]
+    });
+
+  } catch (error) {
+
+    console.error('Error creando usuario:', error);
+
+    res.status(500).json({
+      mensaje: 'Error interno del servidor'
+    });
+  }
+});
+
+
+// =====================================================
+// ELIMINAR USUARIO
+// =====================================================
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!idValido(id)) {
+      return res.status(400).json({
+        mensaje: 'El id del usuario no es válido'
+      });
+    }
+
+    const resultado = await pool.query(
+      `DELETE FROM usuarios
+       WHERE id_usuario = $1
+       RETURNING id_usuario`,
+      [id]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({
+        mensaje: 'Usuario no encontrado'
+      });
+    }
+
+    res.json({
+      mensaje: 'Usuario eliminado correctamente'
+    });
+
+  } catch (error) {
+
+    // 23503 = violación de llave foránea (ej. el usuario tiene citas)
+    if (error.code === '23503') {
+      return res.status(409).json({
+        mensaje: 'No se puede eliminar: el usuario tiene registros asociados. Cámbialo a Inactivo.'
+      });
+    }
+
+    console.error('Error eliminando usuario:', error);
 
     res.status(500).json({
       mensaje: 'Error interno del servidor'
