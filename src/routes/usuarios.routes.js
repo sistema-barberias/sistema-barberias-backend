@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import pool from '../config/database.js';
 
 const router = express.Router();
@@ -167,31 +168,19 @@ router.post('/registro', async (req, res) => {
 // INICIAR SESIÓN
 // =====================================================
 
+
 router.post('/login', async (req, res) => {
   try {
-    const {
-      correo,
-      telefono,
-      password
-    } = req.body;
+    const { correo, telefono, password } = req.body;
 
-
-    // =====================================================
-    // VALIDAR CAMPOS
-    // Se ingresa con correo o con teléfono
-    // =====================================================
-
+    // Validar campos
     if ((!correo && !telefono) || !password) {
       return res.status(400).json({
         mensaje: 'Correo o teléfono y contraseña son obligatorios'
       });
     }
 
-
-    // =====================================================
-    // BUSCAR USUARIO
-    // =====================================================
-
+    // Buscar usuario
     const resultado = await pool.query(
       `SELECT
         id_usuario,
@@ -206,41 +195,27 @@ router.post('/login', async (req, res) => {
       [correo || null, telefono || null]
     );
 
-
-    // =====================================================
-    // USUARIO NO ENCONTRADO
-    // =====================================================
-
+    // Usuario no encontrado
     if (resultado.rows.length === 0) {
       return res.status(401).json({
         mensaje: 'Las credenciales ingresadas no son correctas'
       });
     }
 
-
     const usuario = resultado.rows[0];
 
-
-    // =====================================================
-    // COMPROBAR ESTADO DEL USUARIO
-    // =====================================================
-
+    // Comprobar estado
     if (usuario.estado === 'Inactivo') {
       return res.status(403).json({
         mensaje: 'Tu usuario se encuentra Inactivo'
       });
     }
 
-
-    // =====================================================
-    // COMPROBAR CONTRASEÑA
-    // =====================================================
-
+    // Comprobar contraseña
     const passwordCorrecta = await bcrypt.compare(
       password,
       usuario.password
     );
-
 
     if (!passwordCorrecta) {
       return res.status(401).json({
@@ -248,22 +223,38 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // Comprobar configuración JWT
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET no está configurado');
+
+      return res.status(500).json({
+        mensaje: 'Error de configuración del servidor'
+      });
+    }
+
+    // Generar token
+    const token = jwt.sign(
+      {
+        id_usuario: usuario.id_usuario,
+        rol: usuario.rol
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: '8h'
+      }
+    );
 
     // No enviar la contraseña al frontend
     delete usuario.password;
 
-
-    // =====================================================
-    // RESPUESTA LOGIN
-    // =====================================================
-
+    // Respuesta del login
     res.json({
       mensaje: 'Inicio de sesión exitoso',
-      usuario: usuario
+      token,
+      usuario
     });
 
   } catch (error) {
-
     console.error('Error iniciando sesión:', error);
 
     res.status(500).json({
@@ -271,7 +262,6 @@ router.post('/login', async (req, res) => {
     });
   }
 });
-
 
 // =====================================================
 // BUSCAR USUARIOS
@@ -576,14 +566,14 @@ router.get('/:id', async (req, res) => {
 // Permite definir el rol, a diferencia del registro
 // =====================================================
 
+
 router.post('/', async (req, res) => {
   try {
     const {
       nombre,
       correo,
       telefono,
-      password,
-      rol = 'Cliente'
+      password
     } = req.body;
 
     if (!nombre || !correo || !telefono || !password) {
@@ -610,12 +600,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (!ROLES.includes(rol)) {
-      return res.status(400).json({
-        mensaje: `El rol debe ser uno de: ${ROLES.join(', ')}`
-      });
-    }
-
     const repetido = await datoRepetido({ correo, telefono });
 
     if (repetido) {
@@ -629,7 +613,7 @@ router.post('/', async (req, res) => {
     const resultado = await pool.query(
       `INSERT INTO usuarios
         (nombre, correo, telefono, password, rol, estado)
-       VALUES ($1, $2, $3, $4, $5, 'Activo')
+       VALUES ($1, $2, $3, $4, 'Cliente', 'Activo')
        RETURNING
         id_usuario,
         nombre,
@@ -637,7 +621,7 @@ router.post('/', async (req, res) => {
         telefono,
         rol,
         estado`,
-      [nombre, correo, telefono, passwordHash, rol]
+      [nombre, correo, telefono, passwordHash]
     );
 
     res.status(201).json({
@@ -646,7 +630,6 @@ router.post('/', async (req, res) => {
     });
 
   } catch (error) {
-
     console.error('Error creando usuario:', error);
 
     res.status(500).json({
@@ -704,6 +687,4 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-
 export default router;
-
