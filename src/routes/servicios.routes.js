@@ -7,8 +7,44 @@ import {
 
 const router = express.Router();
 
-// Consultar todos los servicios (solo administradores)
-router.get('/', verificarToken, soloAdministrador, async (req, res) => {
+// Todas las rutas de servicios son solo para administradores
+router.use(verificarToken, soloAdministrador);
+
+const idValido = (id) => /^\d+$/.test(String(id)) && Number(id) > 0;
+
+// Number('') y Number(null) dan 0, y Number(undefined) da NaN: los tres quedan rechazados
+const esNumeroPositivo = (valor) =>
+  Number.isFinite(Number(valor)) && Number(valor) > 0;
+
+// Revisa los datos de un servicio (se usa al registrar y al modificar).
+// Devuelve el texto del problema, o null si todo está bien.
+const validarServicio = ({ nombre, precio, duracion }) => {
+  if (typeof nombre !== 'string' || !nombre.trim()) {
+    return 'El nombre del servicio es obligatorio';
+  }
+
+  // HU-07: ningún servicio puede quedar sin precio
+  if (!esNumeroPositivo(precio)) {
+    return 'El precio es obligatorio y debe ser mayor que cero';
+  }
+
+  if (!esNumeroPositivo(duracion) || !Number.isInteger(Number(duracion))) {
+    return 'La duración debe ser un número entero mayor que cero';
+  }
+
+  return null;
+};
+
+// Valores en el orden de las columnas: nombre, descripcion, precio, duracion
+const valoresServicio = ({ nombre, descripcion, precio, duracion }) => [
+  nombre.trim(),
+  typeof descripcion === 'string' && descripcion.trim() ? descripcion.trim() : null,
+  Number(precio),
+  Number(duracion)
+];
+
+// Consultar todos los servicios
+router.get('/', async (req, res) => {
   try {
     const resultado = await pool.query(
       `SELECT id_servicio, nombre, descripcion, precio, duracion, estado
@@ -29,56 +65,23 @@ router.get('/', verificarToken, soloAdministrador, async (req, res) => {
   }
 });
 
-// Registrar un servicio (solo administradores)
-router.post('/', verificarToken, soloAdministrador, async (req, res) => {
+// Registrar un servicio (HU-05)
+router.post('/', async (req, res) => {
   try {
-    const { nombre, descripcion, precio, duracion } = req.body;
+    const error = validarServicio(req.body);
 
-    // Validar nombre
-    if (!nombre || !nombre.trim()) {
+    if (error) {
       return res.status(400).json({
-        mensaje: 'El nombre del servicio es obligatorio'
+        mensaje: error
       });
     }
 
-    // Validar precio
-    if (
-      precio === undefined ||
-      precio === null ||
-      precio === '' ||
-      !Number.isFinite(Number(precio)) ||
-      Number(precio) <= 0
-    ) {
-      return res.status(400).json({
-        mensaje: 'El precio es obligatorio y debe ser mayor que cero'
-      });
-    }
-
-    // Validar duración
-    if (
-      duracion === undefined ||
-      duracion === null ||
-      duracion === '' ||
-      !Number.isInteger(Number(duracion)) ||
-      Number(duracion) <= 0
-    ) {
-      return res.status(400).json({
-        mensaje: 'La duración debe ser un número entero mayor que cero'
-      });
-    }
-
-    // Guardar servicio en Supabase
     const resultado = await pool.query(
       `INSERT INTO servicios
         (nombre, descripcion, precio, duracion)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [
-        nombre.trim(),
-        descripcion?.trim() || null,
-        Number(precio),
-        Number(duracion)
-      ]
+      valoresServicio(req.body)
     );
 
     return res.status(201).json({
@@ -95,45 +98,22 @@ router.post('/', verificarToken, soloAdministrador, async (req, res) => {
   }
 });
 
-// Modificar un servicio (solo administradores)
-router.put('/:id', verificarToken, soloAdministrador, async (req, res) => {
+// Modificar un servicio (HU-06)
+router.put('/:id', async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    const { nombre, descripcion, precio, duracion } = req.body;
+    const { id } = req.params;
 
-    if (!Number.isInteger(id) || id <= 0) {
+    if (!idValido(id)) {
       return res.status(400).json({
         mensaje: 'El identificador del servicio no es válido'
       });
     }
 
-    if (!nombre || !nombre.trim()) {
-      return res.status(400).json({
-        mensaje: 'El nombre del servicio es obligatorio'
-      });
-    }
+    const error = validarServicio(req.body);
 
-    if (
-      precio === undefined ||
-      precio === null ||
-      precio === '' ||
-      !Number.isFinite(Number(precio)) ||
-      Number(precio) <= 0
-    ) {
+    if (error) {
       return res.status(400).json({
-        mensaje: 'El precio debe ser mayor que cero'
-      });
-    }
-
-    if (
-      duracion === undefined ||
-      duracion === null ||
-      duracion === '' ||
-      !Number.isInteger(Number(duracion)) ||
-      Number(duracion) <= 0
-    ) {
-      return res.status(400).json({
-        mensaje: 'La duración debe ser un número entero mayor que cero'
+        mensaje: error
       });
     }
 
@@ -145,13 +125,7 @@ router.put('/:id', verificarToken, soloAdministrador, async (req, res) => {
            duracion = $4
        WHERE id_servicio = $5
        RETURNING *`,
-      [
-        nombre.trim(),
-        descripcion?.trim() || null,
-        Number(precio),
-        Number(duracion),
-        id
-      ]
+      [...valoresServicio(req.body), Number(id)]
     );
 
     if (resultado.rows.length === 0) {
@@ -175,12 +149,12 @@ router.put('/:id', verificarToken, soloAdministrador, async (req, res) => {
 });
 
 
-// Eliminar definitivamente un servicio (solo administradores)
-router.delete('/:id', verificarToken, soloAdministrador, async (req, res) => {
+// Eliminar definitivamente un servicio (HU-06)
+router.delete('/:id', async (req, res) => {
   try {
-    const id = Number(req.params.id);
+    const { id } = req.params;
 
-    if (!Number.isInteger(id) || id <= 0) {
+    if (!idValido(id)) {
       return res.status(400).json({
         mensaje: 'El identificador del servicio no es válido'
       });
@@ -190,7 +164,7 @@ router.delete('/:id', verificarToken, soloAdministrador, async (req, res) => {
       `DELETE FROM servicios
        WHERE id_servicio = $1
        RETURNING id_servicio`,
-      [id]
+      [Number(id)]
     );
 
     if (resultado.rows.length === 0) {
@@ -204,13 +178,14 @@ router.delete('/:id', verificarToken, soloAdministrador, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error eliminando servicio:', error);
-
+    // 23503 = violación de llave foránea (ej. el servicio tiene citas)
     if (error.code === '23503') {
       return res.status(409).json({
         mensaje: 'No se puede eliminar este servicio porque está relacionado con otros registros.'
       });
     }
+
+    console.error('Error eliminando servicio:', error);
 
     return res.status(500).json({
       mensaje: 'Error interno del servidor'

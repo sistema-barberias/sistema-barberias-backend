@@ -2,12 +2,42 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import pool from '../config/database.js';
+import {
+  verificarToken,
+  soloAdministrador
+} from '../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
 const ROLES = ['Cliente', 'Barbero', 'Administrador'];
 
+const REGEX_CORREO = /^[^\s@]+@(gmail|hotmail)\.com$/i;   // Solo Gmail o Hotmail
+const REGEX_TELEFONO = /^\d+$/;                          // Solo números
+const REGEX_PASSWORD = /^\d{6}$/;                        // Exactamente 6 dígitos
+
 const idValido = (id) => /^\d+$/.test(String(id));
+
+// Revisa los datos para crear un usuario (registro público y creación desde administración).
+// Devuelve el texto del problema, o null si todo está bien.
+const validarNuevoUsuario = ({ nombre, correo, telefono, password }) => {
+  if (!nombre || !correo || !telefono || !password) {
+    return 'Nombre, correo, teléfono y contraseña son obligatorios';
+  }
+
+  if (!REGEX_CORREO.test(correo)) {
+    return 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)';
+  }
+
+  if (!REGEX_TELEFONO.test(String(telefono))) {
+    return 'El teléfono solo puede contener números';
+  }
+
+  if (!REGEX_PASSWORD.test(password)) {
+    return 'La contraseña debe tener exactamente 6 dígitos numéricos';
+  }
+
+  return null;
+};
 
 // Devuelve el texto del problema si el correo o el teléfono ya los usa OTRO usuario
 // (idExcluido sirve al editar, para no chocar con el propio usuario). Si están libres, devuelve null.
@@ -48,54 +78,16 @@ router.post('/registro', async (req, res) => {
 
 
     // =====================================================
-    // VALIDAR CAMPOS OBLIGATORIOS
+    // VALIDAR DATOS
+    // Campos obligatorios, correo Gmail/Hotmail, teléfono
+    // solo números y contraseña de 6 dígitos
     // =====================================================
 
-    if (!nombre || !correo || !telefono || !password) {
+    const error = validarNuevoUsuario(req.body);
+
+    if (error) {
       return res.status(400).json({
-        mensaje: 'Nombre, correo, teléfono y contraseña son obligatorios'
-      });
-    }
-
-
-    // =====================================================
-    // VALIDAR CORREO
-    // Solo permite Gmail o Hotmail
-    // =====================================================
-
-    const correoValido = /^[^\s@]+@(gmail|hotmail)\.com$/i;
-
-    if (!correoValido.test(correo)) {
-      return res.status(400).json({
-        mensaje: 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)'
-      });
-    }
-
-
-    // =====================================================
-    // VALIDAR TELÉFONO
-    // Solo permite números
-    // =====================================================
-
-    const telefonoValido = /^\d+$/;
-
-    if (!telefonoValido.test(String(telefono))) {
-      return res.status(400).json({
-        mensaje: 'El teléfono solo puede contener números'
-      });
-    }
-
-
-    // =====================================================
-    // VALIDAR CONTRASEÑA
-    // Exactamente 6 dígitos numéricos
-    // =====================================================
-
-    const passwordValida = /^\d{6}$/;
-
-    if (!passwordValida.test(password)) {
-      return res.status(400).json({
-        mensaje: 'La contraseña debe tener exactamente 6 dígitos numéricos'
+        mensaje: error
       });
     }
 
@@ -264,6 +256,15 @@ router.post('/login', async (req, res) => {
 });
 
 // =====================================================
+// RUTAS DE ADMINISTRACIÓN
+// Todas las rutas de aquí en adelante exigen una sesión
+// de administrador (token en el encabezado Authorization)
+// =====================================================
+
+router.use(verificarToken, soloAdministrador);
+
+
+// =====================================================
 // BUSCAR USUARIOS
 // =====================================================
 
@@ -352,14 +353,14 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    if (telefono && !/^\d+$/.test(String(telefono))) {
+    if (telefono && !REGEX_TELEFONO.test(String(telefono))) {
       return res.status(400).json({
         mensaje: 'El teléfono solo puede contener números'
       });
     }
 
 
-    if (correo && !/^[^\s@]+@(gmail|hotmail)\.com$/i.test(correo)) {
+    if (correo && !REGEX_CORREO.test(correo)) {
       return res.status(400).json({
         mensaje: 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)'
       });
@@ -564,6 +565,7 @@ router.get('/:id', async (req, res) => {
 // =====================================================
 // CREAR USUARIO (administración)
 // Permite definir el rol, a diferencia del registro
+// (por ejemplo, registrar barberos: HU-08)
 // =====================================================
 
 
@@ -573,30 +575,21 @@ router.post('/', async (req, res) => {
       nombre,
       correo,
       telefono,
-      password
+      password,
+      rol = 'Cliente'
     } = req.body;
 
-    if (!nombre || !correo || !telefono || !password) {
+    const error = validarNuevoUsuario(req.body);
+
+    if (error) {
       return res.status(400).json({
-        mensaje: 'Nombre, correo, teléfono y contraseña son obligatorios'
+        mensaje: error
       });
     }
 
-    if (!/^[^\s@]+@(gmail|hotmail)\.com$/i.test(correo)) {
+    if (!ROLES.includes(rol)) {
       return res.status(400).json({
-        mensaje: 'El correo debe ser de Gmail o Hotmail (@gmail.com o @hotmail.com)'
-      });
-    }
-
-    if (!/^\d+$/.test(String(telefono))) {
-      return res.status(400).json({
-        mensaje: 'El teléfono solo puede contener números'
-      });
-    }
-
-    if (!/^\d{6}$/.test(password)) {
-      return res.status(400).json({
-        mensaje: 'La contraseña debe tener exactamente 6 dígitos numéricos'
+        mensaje: `El rol debe ser uno de: ${ROLES.join(', ')}`
       });
     }
 
@@ -613,7 +606,7 @@ router.post('/', async (req, res) => {
     const resultado = await pool.query(
       `INSERT INTO usuarios
         (nombre, correo, telefono, password, rol, estado)
-       VALUES ($1, $2, $3, $4, 'Cliente', 'Activo')
+       VALUES ($1, $2, $3, $4, $5, 'Activo')
        RETURNING
         id_usuario,
         nombre,
@@ -621,7 +614,7 @@ router.post('/', async (req, res) => {
         telefono,
         rol,
         estado`,
-      [nombre, correo, telefono, passwordHash]
+      [nombre, correo, telefono, passwordHash, rol]
     );
 
     res.status(201).json({

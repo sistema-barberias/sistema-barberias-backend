@@ -11,6 +11,11 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
+// Sin esta clave no se pueden firmar ni verificar las sesiones (login y rutas de administrador)
+if (!process.env.JWT_SECRET) {
+  console.warn('Falta JWT_SECRET en el archivo .env: el inicio de sesión no funcionará');
+}
+
 app.use(cors());
 
 app.use(express.json());
