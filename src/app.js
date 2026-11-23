@@ -1,0 +1,67 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import pool from './config/database.js';
+import usuariosRoutes from './routes/usuarios.routes.js';
+import serviciosRoutes from './routes/servicios.routes.js';
+import horariosRoutes from './routes/horarios.routes.js';
+
+dotenv.config();
+
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+
+// Sin esta clave no se pueden firmar ni verificar las sesiones (login y rutas de administrador)
+if (!process.env.JWT_SECRET) {
+  console.warn('Falta JWT_SECRET en el archivo .env: el inicio de sesión no funcionará');
+}
+
+app.use(cors());
+
+app.use(express.json());
+
+
+// Rutas de usuarios
+app.use('/api/usuarios', usuariosRoutes);
+app.use('/api/servicios', serviciosRoutes);
+app.use('/api/horarios', horariosRoutes);
+
+
+// Ruta principal
+app.get('/', (req, res) => {
+  res.json({
+    mensaje: 'API del Sistema de Gestión de Barberías funcionando correctamente',
+    estado: 'Activo'
+  });
+});
+
+
+// Prueba de conexión con PostgreSQL
+app.get('/api/prueba-db', async (req, res) => {
+  try {
+    const resultado = await pool.query('SELECT NOW()');
+
+    res.json({
+      mensaje: 'Conexión con PostgreSQL exitosa',
+      fecha: resultado.rows[0].now
+    });
+
+  } catch (error) {
+    console.error(
+      'Error conectando a PostgreSQL:',
+      error
+    );
+
+    res.status(500).json({
+      mensaje: 'Error al conectar con PostgreSQL'
+    });
+  }
+});
+
+
+app.listen(PORT, () => {
+  console.log(
+    `Servidor ejecutándose en http://localhost:${PORT}`
+  );
+});
