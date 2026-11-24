@@ -79,3 +79,16 @@ export const soloAdministrador = (req, res, next) => {
 
   next();
 };
+
+
+// Permitir el acceso únicamente a clientes (reservan y gestionan sus citas)
+export const soloCliente = (req, res, next) => {
+
+  if (req.usuario?.rol !== 'Cliente') {
+    return res.status(403).json({
+      mensaje: 'Solo los clientes pueden realizar esta acción'
+    });
+  }
+
+  next();
+};

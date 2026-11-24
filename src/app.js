@@ -6,6 +6,7 @@ import usuariosRoutes from './routes/usuarios.routes.js';
 import serviciosRoutes from './routes/servicios.routes.js';
 import horariosRoutes from './routes/horarios.routes.js';
 import disponibilidadRoutes from './routes/disponibilidad.routes.js';
+import citasRoutes from './routes/citas.routes.js';
 
 dotenv.config();
 
@@ -23,11 +24,12 @@ app.use(cors());
 app.use(express.json());
 
 
-// Rutas de usuarios
+// Rutas de la API
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/servicios', serviciosRoutes);
 app.use('/api/horarios', horariosRoutes);
 app.use('/api/disponibilidad', disponibilidadRoutes);
+app.use('/api/citas', citasRoutes);
 
 
 // Ruta principal

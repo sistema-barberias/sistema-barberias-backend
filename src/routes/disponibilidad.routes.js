@@ -4,9 +4,12 @@ import { verificarToken } from '../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
+// Cualquier usuario con sesión puede consultar la disponibilidad.
+// Esta ruta es de solo lectura: los horarios se gestionan en /api/horarios (HU-09).
 router.use(verificarToken);
 
-// Consultar horarios para los clientes (HU-10)
+// Consultar los horarios de atención de los barberos (HU-10).
+// Solo se muestran barberos activos: un barbero inactivo no puede atender citas.
 router.get('/', async (req, res) => {
   try {
     const resultado = await pool.query(
@@ -19,6 +22,8 @@ router.get('/', async (req, res) => {
          to_char(h.hora_fin, 'HH24:MI') AS hora_fin
        FROM horarios h
        JOIN usuarios u ON u.id_usuario = h.id_barbero
+       WHERE u.rol = 'Barbero'
+         AND u.estado = 'Activo'
        ORDER BY u.nombre, h.dia_semana, h.hora_inicio`
     );
 
