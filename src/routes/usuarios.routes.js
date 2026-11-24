@@ -14,14 +14,26 @@ const ROLES = ['Cliente', 'Barbero', 'Administrador'];
 const REGEX_CORREO = /^[^\s@]+@(gmail|hotmail)\.com$/i;   // Solo Gmail o Hotmail
 const REGEX_TELEFONO = /^\d+$/;                          // Solo números
 const REGEX_PASSWORD = /^\d{6}$/;                        // Exactamente 6 dígitos
+const REGEX_CEDULA = /^\d{6}(\d{4})?$/;
 
 const idValido = (id) => /^\d+$/.test(String(id));
 
 // Revisa los datos para crear un usuario (registro público y creación desde administración).
 // Devuelve el texto del problema, o null si todo está bien.
-const validarNuevoUsuario = ({ nombre, correo, telefono, password }) => {
-  if (!nombre || !correo || !telefono || !password) {
-    return 'Nombre, correo, teléfono y contraseña son obligatorios';
+const validarNuevoUsuario = ({
+  nombre,
+  correo,
+  telefono,
+  password,
+  cedula
+}) => {
+
+  if (!nombre || !correo || !telefono || !password || !cedula) {
+    return 'Nombre, cédula, correo, teléfono y contraseña son obligatorios';
+  }
+
+  if (!REGEX_CEDULA.test(String(cedula).trim())) {
+    return 'La cédula debe tener exactamente 6 o 10 números';
   }
 
   if (!REGEX_CORREO.test(correo)) {
@@ -42,13 +54,19 @@ const validarNuevoUsuario = ({ nombre, correo, telefono, password }) => {
 // Devuelve el texto del problema si el correo o el teléfono ya los usa OTRO usuario
 // (idExcluido sirve al editar, para no chocar con el propio usuario). Si están libres, devuelve null.
 // Es necesario que el teléfono sea único porque también se usa para iniciar sesión.
-const datoRepetido = async ({ correo, telefono }, idExcluido = null) => {
+const datoRepetido = async (
+  { correo, telefono, cedula },
+  idExcluido = null
+) => {
   if (correo) {
     const r = await pool.query(
       'SELECT 1 FROM usuarios WHERE correo = $1 AND id_usuario IS DISTINCT FROM $2',
       [correo, idExcluido]
     );
-    if (r.rows.length > 0) return 'El correo ya está registrado';
+
+    if (r.rows.length > 0) {
+      return 'El correo ya está registrado';
+    }
   }
 
   if (telefono) {
@@ -56,7 +74,21 @@ const datoRepetido = async ({ correo, telefono }, idExcluido = null) => {
       'SELECT 1 FROM usuarios WHERE telefono::text = $1 AND id_usuario IS DISTINCT FROM $2',
       [String(telefono), idExcluido]
     );
-    if (r.rows.length > 0) return 'El teléfono ya está registrado';
+
+    if (r.rows.length > 0) {
+      return 'El teléfono ya está registrado';
+    }
+  }
+
+  if (cedula) {
+    const r = await pool.query(
+      'SELECT 1 FROM usuarios WHERE cedula = $1 AND id_usuario IS DISTINCT FROM $2',
+      [String(cedula).trim(), idExcluido]
+    );
+
+    if (r.rows.length > 0) {
+      return 'La cédula ya está registrada';
+    }
   }
 
   return null;
@@ -71,6 +103,7 @@ router.post('/registro', async (req, res) => {
   try {
     const {
       nombre,
+      cedula,
       correo,
       telefono,
       password
@@ -96,7 +129,7 @@ router.post('/registro', async (req, res) => {
     // COMPROBAR SI EL CORREO O EL TELÉFONO YA ESTÁN REGISTRADOS
     // =====================================================
 
-    const repetido = await datoRepetido({ correo, telefono });
+    const repetido = await datoRepetido({ correo, telefono, cedula });
 
     if (repetido) {
       return res.status(400).json({
@@ -118,21 +151,10 @@ router.post('/registro', async (req, res) => {
 
     const resultado = await pool.query(
       `INSERT INTO usuarios
-        (nombre, correo, telefono, password, rol, estado)
-       VALUES ($1, $2, $3, $4, 'Cliente', 'Activo')
-       RETURNING
-        id_usuario,
-        nombre,
-        correo,
-        telefono,
-        rol,
-        estado`,
-      [
-        nombre,
-        correo,
-        telefono,
-        passwordHash
-      ]
+      nombre, cedula, correo, telefono, password, rol, estado)
+      VALUES ($1, $2, $3, $4, $5, 'Cliente', 'Activo')
+      RETURNING id_usuario, nombre, cedula, correo, telefono, rol, estado`,
+      [nombre, String(cedula).trim(), correo, telefono, passwordHash]
     );
 
 
@@ -246,10 +268,20 @@ router.post('/login', async (req, res) => {
       usuario
     });
 
-  } catch (error) {
-    console.error('Error iniciando sesión:', error);
+  }
+  catch (error) {
+    console.error('Error al registrar usuario:', error);
 
-    res.status(500).json({
+    if (
+      error.code === '23505' &&
+      error.constraint === 'usuarios_cedula_unica'
+    ) {
+      return res.status(409).json({
+        mensaje: 'La cédula ya está registrada'
+      });
+    }
+
+    return res.status(500).json({
       mensaje: 'Error interno del servidor'
     });
   }
@@ -573,6 +605,7 @@ router.post('/', async (req, res) => {
   try {
     const {
       nombre,
+      cedula,
       correo,
       telefono,
       password,
@@ -593,7 +626,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const repetido = await datoRepetido({ correo, telefono });
+    const repetido = await datoRepetido({ correo, telefono, cedula });
 
     if (repetido) {
       return res.status(400).json({
@@ -605,16 +638,17 @@ router.post('/', async (req, res) => {
 
     const resultado = await pool.query(
       `INSERT INTO usuarios
-        (nombre, correo, telefono, password, rol, estado)
-       VALUES ($1, $2, $3, $4, $5, 'Activo')
-       RETURNING
-        id_usuario,
+      (nombre, cedula, correo, telefono, password, rol, estado)
+      VALUES ($1, $2, $3, $4, $5, $6, 'Activo')
+      RETURNING id_usuario, nombre, cedula, correo, telefono, rol, estado`,
+      [
         nombre,
+        String(cedula).trim(),
         correo,
         telefono,
-        rol,
-        estado`,
-      [nombre, correo, telefono, passwordHash, rol]
+        passwordHash,
+        rol
+      ]
     );
 
     res.status(201).json({
@@ -625,7 +659,16 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Error creando usuario:', error);
 
-    res.status(500).json({
+    if (
+      error.code === '23505' &&
+      error.constraint === 'usuarios_cedula_unica'
+    ) {
+      return res.status(409).json({
+        mensaje: 'La cédula ya está registrada'
+      });
+    }
+
+    return res.status(500).json({
       mensaje: 'Error interno del servidor'
     });
   }
