@@ -1,4 +1,3 @@
-
 import express from 'express';
 import pool from '../config/database.js';
 import { verificarToken } from '../middlewares/auth.middleware.js';

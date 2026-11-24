@@ -5,6 +5,7 @@ import pool from './config/database.js';
 import usuariosRoutes from './routes/usuarios.routes.js';
 import serviciosRoutes from './routes/servicios.routes.js';
 import horariosRoutes from './routes/horarios.routes.js';
+import disponibilidadRoutes from './routes/disponibilidad.routes.js';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use(express.json());
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/servicios', serviciosRoutes);
 app.use('/api/horarios', horariosRoutes);
+app.use('/api/disponibilidad', disponibilidadRoutes);
 
 
 // Ruta principal
