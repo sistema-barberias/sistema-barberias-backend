@@ -94,6 +94,17 @@ const datoRepetido = async (
   return null;
 };
 
+// Mensajes para cuando la base de datos rechaza un dato repetido (código 23505).
+// Pasa si dos personas se registran al mismo tiempo con la misma cédula o correo:
+// las dos superan datoRepetido() y la restricción UNIQUE detiene a la segunda.
+const DATO_DUPLICADO = {
+  usuarios_cedula_unica: 'La cédula ya está registrada',
+  usuarios_correo_key: 'El correo ya está registrado'
+};
+
+const mensajeDatoDuplicado = (error) =>
+  error.code === '23505' ? DATO_DUPLICADO[error.constraint] ?? null : null;
+
 
 // =====================================================
 // REGISTRAR USUARIO
@@ -151,7 +162,7 @@ router.post('/registro', async (req, res) => {
 
     const resultado = await pool.query(
       `INSERT INTO usuarios
-      nombre, cedula, correo, telefono, password, rol, estado)
+      (nombre, cedula, correo, telefono, password, rol, estado)
       VALUES ($1, $2, $3, $4, $5, 'Cliente', 'Activo')
       RETURNING id_usuario, nombre, cedula, correo, telefono, rol, estado`,
       [nombre, String(cedula).trim(), correo, telefono, passwordHash]
@@ -168,6 +179,14 @@ router.post('/registro', async (req, res) => {
     });
 
   } catch (error) {
+
+    const duplicado = mensajeDatoDuplicado(error);
+
+    if (duplicado) {
+      return res.status(409).json({
+        mensaje: duplicado
+      });
+    }
 
     console.error('Error registrando usuario:', error);
 
@@ -270,16 +289,7 @@ router.post('/login', async (req, res) => {
 
   }
   catch (error) {
-    console.error('Error al registrar usuario:', error);
-
-    if (
-      error.code === '23505' &&
-      error.constraint === 'usuarios_cedula_unica'
-    ) {
-      return res.status(409).json({
-        mensaje: 'La cédula ya está registrada'
-      });
-    }
+    console.error('Error al iniciar sesión:', error);
 
     return res.status(500).json({
       mensaje: 'Error interno del servidor'
@@ -657,16 +667,15 @@ router.post('/', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creando usuario:', error);
+    const duplicado = mensajeDatoDuplicado(error);
 
-    if (
-      error.code === '23505' &&
-      error.constraint === 'usuarios_cedula_unica'
-    ) {
+    if (duplicado) {
       return res.status(409).json({
-        mensaje: 'La cédula ya está registrada'
+        mensaje: duplicado
       });
     }
+
+    console.error('Error creando usuario:', error);
 
     return res.status(500).json({
       mensaje: 'Error interno del servidor'
